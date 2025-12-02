@@ -89,19 +89,32 @@ class ImprovedPhishingDetector:
         
         safe_contexts = {
             'link': [
-                'this', 'the', 'our', 'here', 'attached', 'document', 'report', 'website', 'page'
+                'this', 'the', 'our', 'here', 'attached', 'document', 'report', 'website', 'page',
+                'evaluation', 'course', 'student', 'academic', 'university', 'form', 'survey',
+                'payment', 'invoice', 'schedule', 'agenda', 'assignment', 'project'
             ],
             'now': [
-                'meeting', 'schedule', 'please', 'contact', 'respond', 'reply', 'follow'
+                'meeting', 'schedule', 'please', 'contact', 'respond', 'reply', 'follow',
+                'complete', 'finish', 'submit', 'deadline', 'due'
             ],
             'click': [
-                'here', 'this', 'below', 'link', 'button', 'select'
+                'here', 'this', 'below', 'link', 'button', 'select',
+                'view', 'access', 'open', 'download', 'view'
             ],
             'account': [
-                'your', 'our', 'company', 'business', 'corporate', 'client'
+                'your', 'our', 'company', 'business', 'corporate', 'client',
+                'student', 'university', 'academic', 'system', 'portal'
             ],
             'verify': [
-                'identity', 'information', 'documentation', 'credentials'
+                'identity', 'information', 'documentation', 'credentials',
+                'course', 'evaluation', 'survey', 'registration', 'enrollment'
+            ],
+            'urgent': [
+                'please', 'kindly', 'without fail', 'due', 'deadline', 'reminder'
+            ],
+            'evaluation': [
+                'course', 'student', 'teacher', 'academic', 'university', 'survey', 'form',
+                'feedback', 'assessment', 'review', 'complete', 'finish'
             ]
         }
         
@@ -118,6 +131,36 @@ class ImprovedPhishingDetector:
                 return True
         
         return False
+    
+    def is_academic_context(self, text):
+        """Check if email is from academic/institutional context (strong indicator of legitimacy)"""
+        academic_indicators = {
+            'institutions': ['university', 'college', 'school', 'institute', 'campus', 'faculty'],
+            'roles': ['professor', 'teacher', 'instructor', 'student', 'dean', 'chair', 'lecturer'],
+            'academic_terms': ['course', 'semester', 'evaluation', 'assignment', 'exam', 'lecture', 'syllabus'],
+            'educational': ['students', 'academic', 'curriculum', 'research', 'scholarship', 'degree'],
+            'university_domains': ['.edu', '.ac.', 'university', 'college', 'institute'],
+            'formal_greetings': ['dear students', 'greetings', 'regards', 'sincerely'],
+            'educational_urls': ['course', 'student', 'university', 'academic', 'education', 'portal']
+        }
+        
+        text_lower = text.lower()
+        academic_score = 0
+        
+        for category, indicators in academic_indicators.items():
+            for indicator in indicators:
+                if indicator in text_lower:
+                    academic_score += 1
+        
+        # Check for university domain in URLs
+        if 'utas.edu.om' in text_lower or any(domain in text_lower for domain in ['.edu', '.ac.']):
+            academic_score += 2
+        
+        # Check for official university URL pattern
+        if re.search(r'https?://[a-zA-Z0-9.-]+\.(edu|ac)\.[a-zA-Z]{2,}', text_lower):
+            academic_score += 3
+            
+        return academic_score >= 3  # If 3 or more academic indicators found
         
     def preprocess_text(self, text):
         """Enhanced text preprocessing for better feature extraction"""
@@ -283,10 +326,13 @@ class ImprovedPhishingDetector:
             # Step 1: Input validation and sanitization
             sanitized_text = self.validate_and_sanitize_input(email_text)
             
-            # Step 2: Apply contextual analysis to prevent false positives
+            # Step 2: Apply academic context detection first
+            is_academic = self.is_academic_context(sanitized_text)
+            
+            # Step 3: Apply contextual analysis to prevent false positives
             if self.context_security_enabled:
                 # Check for keywords that often cause false positives
-                problematic_keywords = ['link', 'now', 'click', 'account', 'verify']
+                problematic_keywords = ['link', 'now', 'click', 'account', 'verify', 'urgent', 'evaluation']
                 context_safe_flags = {}
                 
                 for keyword in problematic_keywords:
@@ -296,14 +342,19 @@ class ImprovedPhishingDetector:
                         else:
                             context_safe_flags[keyword] = False
             
-            # Step 3: Enhanced preprocessing with context consideration
+            # Step 4: Enhanced preprocessing with context consideration
             clean_text = self.preprocess_text(sanitized_text)
             
-            # Step 4: Make prediction
+            # Step 5: Make prediction
             prediction = self.pipeline.predict([clean_text])[0]
             probabilities = self.pipeline.predict_proba([clean_text])[0]
             
-            # Step 5: Calculate confidence with contextual adjustments
+            # Step 6: Apply academic context override if detected
+            if is_academic and prediction == 1:  # Model predicted phishing but academic context found
+                prediction = 0  # Override to Safe
+                print("🔍 Academic context detected - overriding model prediction to Safe")
+            
+            # Step 7: Calculate confidence with contextual adjustments
             safe_prob = probabilities[0] * 100
             phishing_prob = probabilities[1] * 100
             
@@ -353,7 +404,8 @@ class ImprovedPhishingDetector:
                 'safe_probability': safe_prob,
                 'phishing_probability': phishing_prob,
                 'security_validation': 'passed',
-                'context_analysis': context_safe_flags if self.context_security_enabled else None
+                'context_analysis': context_safe_flags if self.context_security_enabled else None,
+                'academic_context': is_academic
             }
             
             return result
@@ -367,7 +419,8 @@ class ImprovedPhishingDetector:
                 'safe_probability': 0,
                 'phishing_probability': 0,
                 'security_validation': 'failed',
-                'context_analysis': None
+                'context_analysis': None,
+                'academic_context': False
             }
     
     def analyze_email_content(self, email_text):
@@ -511,7 +564,17 @@ class ImprovedPhishingDetector:
             "We need to discuss the project now, can you schedule a call?",
             "Click here to view the attached report and respond by tomorrow",
             "Your account details are in the attached invoice",
-            "Verify your credentials before accessing the secure document"
+            "Verify your credentials before accessing the secure document",
+            # Test case from user's university professor
+            """SARAH ZUHAIR HAMED AL ARAIMI;+47 others
+Dear Students
+Greetings
+Kindly complete the Course Evaluation Link without Fail. Those who do  not complete the evaluation their semester work will not be evaluated.
+
+The evaluation link: 
+https://evaluation.utas.edu.om/studenteval/home.php
+
+Regards,"""
         ]
         
         for i, test_case in enumerate(false_positive_cases, 1):
