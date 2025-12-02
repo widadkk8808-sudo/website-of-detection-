@@ -17,6 +17,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 import pickle
 import re
+import html
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -30,7 +31,12 @@ class ImprovedPhishingDetector:
     
     Version: 3.13.4
     Minimum Python: 3.7.3
-    Enhanced with better training data and accuracy improvements
+    Enhanced with better training data, accuracy improvements, security fixes, and contextual analysis
+    
+    Security Fixes:
+    - Input validation and sanitization
+    - Protection against malicious script injection
+    - Contextual analysis to prevent false positives
     """
     
     def __init__(self):
@@ -38,6 +44,80 @@ class ImprovedPhishingDetector:
         self.is_trained = False
         self.version = PYTHON_VERSION
         self.min_version = MIN_PYTHON_VERSION
+        self.context_security_enabled = True  # Enable contextual analysis
+        
+    def validate_and_sanitize_input(self, email_text):
+        """Enhanced input validation and sanitization for security"""
+        if not isinstance(email_text, str):
+            raise ValueError("Email content must be a string")
+        
+        # Remove null bytes and control characters
+        email_text = ''.join(char for char in email_text if ord(char) >= 32 or char in ['\n', '\r', '\t'])
+        
+        # Remove potential script tags and HTML
+        script_pattern = re.compile(r'<script[^>]*>.*?</script>', re.IGNORECASE | re.DOTALL)
+        if script_pattern.search(email_text):
+            raise ValueError("Potentially malicious script content detected")
+        
+        # Remove other dangerous HTML tags
+        dangerous_tags = ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'link', 'style']
+        for tag in dangerous_tags:
+            if f'<{tag}' in email_text.lower():
+                raise ValueError(f"Potentially dangerous HTML tag <{tag}> detected")
+        
+        # HTML entity decoding for security
+        email_text = html.unescape(email_text)
+        
+        # Length validation
+        if len(email_text) > 50000:  # 50KB limit
+            raise ValueError("Email content too long")
+        
+        if len(email_text) < 5:  # Minimum length
+            raise ValueError("Email content too short")
+        
+        return email_text
+    
+    def is_context_safe(self, text, keyword, window_size=10):
+        """Check if keyword appears in safe context (business/professional)"""
+        words = text.lower().split()
+        keyword_positions = []
+        
+        # Find all positions of the keyword
+        for i, word in enumerate(words):
+            if keyword.lower() in word or word in keyword.lower():
+                keyword_positions.append(i)
+        
+        safe_contexts = {
+            'link': [
+                'this', 'the', 'our', 'here', 'attached', 'document', 'report', 'website', 'page'
+            ],
+            'now': [
+                'meeting', 'schedule', 'please', 'contact', 'respond', 'reply', 'follow'
+            ],
+            'click': [
+                'here', 'this', 'below', 'link', 'button', 'select'
+            ],
+            'account': [
+                'your', 'our', 'company', 'business', 'corporate', 'client'
+            ],
+            'verify': [
+                'identity', 'information', 'documentation', 'credentials'
+            ]
+        }
+        
+        safe_words = safe_contexts.get(keyword.lower(), [])
+        
+        for pos in keyword_positions:
+            # Check surrounding words (context window)
+            start = max(0, pos - window_size)
+            end = min(len(words), pos + window_size + 1)
+            context_words = words[start:end]
+            
+            # If context contains safe words, likely legitimate
+            if any(safe_word in ' '.join(context_words) for safe_word in safe_words):
+                return True
+        
+        return False
         
     def preprocess_text(self, text):
         """Enhanced text preprocessing for better feature extraction"""
@@ -132,7 +212,11 @@ class ImprovedPhishingDetector:
         print("🔧 Creating comprehensive training dataset...")
         emails, labels = self.create_comprehensive_dataset()
         
-        print(f"📊 Dataset size: {len(emails)} emails ({len(phishing_emails)} phishing, {len(safe_emails)} safe)")
+        # Count phishing and safe emails
+        phishing_count = sum(1 for label in labels if label == 'Phishing')
+        safe_count = sum(1 for label in labels if label == 'Safe')
+        
+        print(f"📊 Dataset size: {len(emails)} emails ({phishing_count} phishing, {safe_count} safe)")
         
         # Preprocess emails
         print("🧹 Preprocessing training data...")
@@ -191,40 +275,100 @@ class ImprovedPhishingDetector:
         return True
     
     def predict_email(self, email_text):
-        """Improved prediction with better confidence scoring"""
+        """Improved prediction with security validation and contextual analysis"""
         if not self.is_trained:
             raise ValueError("Model not trained yet!")
         
-        # Preprocess the input text
-        clean_text = self.preprocess_text(email_text)
-        
-        # Make prediction
-        prediction = self.pipeline.predict([clean_text])[0]
-        probabilities = self.pipeline.predict_proba([clean_text])[0]
-        
-        # Get confidence scores
-        safe_prob = probabilities[0] * 100
-        phishing_prob = probabilities[1] * 100
-        
-        # Ensure minimum confidence for predictions
-        if prediction == 0:  # Predicted Safe
-            confidence = safe_prob
-        else:  # Predicted Phishing
-            confidence = phishing_prob
+        try:
+            # Step 1: Input validation and sanitization
+            sanitized_text = self.validate_and_sanitize_input(email_text)
             
-        # Boost confidence for obvious phishing patterns
-        phishing_keywords = ['congratulations', 'free', 'win', 'prize', 'click', 'urgent', 'immediate', 'lottery']
-        if any(keyword in clean_text for keyword in phishing_keywords) and prediction == 1:
-            confidence = max(confidence, 85.0)  # Boost confidence for obvious phishing
-        
-        result = {
-            'prediction': 'Phishing' if prediction == 1 else 'Safe',
-            'confidence': confidence,
-            'safe_probability': safe_prob,
-            'phishing_probability': phishing_prob
-        }
-        
-        return result
+            # Step 2: Apply contextual analysis to prevent false positives
+            if self.context_security_enabled:
+                # Check for keywords that often cause false positives
+                problematic_keywords = ['link', 'now', 'click', 'account', 'verify']
+                context_safe_flags = {}
+                
+                for keyword in problematic_keywords:
+                    if keyword in sanitized_text.lower():
+                        if self.is_context_safe(sanitized_text.lower(), keyword):
+                            context_safe_flags[keyword] = True
+                        else:
+                            context_safe_flags[keyword] = False
+            
+            # Step 3: Enhanced preprocessing with context consideration
+            clean_text = self.preprocess_text(sanitized_text)
+            
+            # Step 4: Make prediction
+            prediction = self.pipeline.predict([clean_text])[0]
+            probabilities = self.pipeline.predict_proba([clean_text])[0]
+            
+            # Step 5: Calculate confidence with contextual adjustments
+            safe_prob = probabilities[0] * 100
+            phishing_prob = probabilities[1] * 100
+            
+            # Enhanced confidence calculation
+            if prediction == 0:  # Predicted Safe
+                confidence = safe_prob
+                
+                # Boost confidence if problematic keywords are in safe context
+                if self.context_security_enabled and any(context_safe_flags.values()):
+                    confidence = min(95, confidence + 10)  # Boost confidence for context-safe cases
+                    
+            else:  # Predicted Phishing
+                confidence = phishing_prob
+                
+                # Reduce confidence if only weak phishing indicators found
+                if self.context_security_enabled:
+                    weak_indicators = 0
+                    strong_indicators = 0
+                    
+                    # Count weak vs strong indicators
+                    strong_patterns = ['congratulations.*win', 'free.*(iphone|car|phone)', 'urgent.*account.*suspended']
+                    weak_patterns = ['link', 'now', 'click', 'urgent', 'verify']
+                    
+                    text_lower = sanitized_text.lower()
+                    
+                    for pattern in strong_patterns:
+                        if re.search(pattern, text_lower):
+                            strong_indicators += 1
+                    
+                    for keyword in weak_patterns:
+                        if keyword in text_lower:
+                            if context_safe_flags.get(keyword, False):  # Safe context
+                                weak_indicators -= 0.5  # Reduce impact
+                            else:
+                                weak_indicators += 1
+                    
+                    # If mostly weak indicators and in safe context, reduce confidence
+                    if weak_indicators > strong_indicators and any(context_safe_flags.values()):
+                        confidence = max(50, confidence - 20)  # Reduce confidence for likely false positives
+            
+            # Ensure reasonable confidence bounds
+            confidence = max(50, min(95, confidence))
+            
+            result = {
+                'prediction': 'Phishing' if prediction == 1 else 'Safe',
+                'confidence': confidence,
+                'safe_probability': safe_prob,
+                'phishing_probability': phishing_prob,
+                'security_validation': 'passed',
+                'context_analysis': context_safe_flags if self.context_security_enabled else None
+            }
+            
+            return result
+            
+        except ValueError as e:
+            # Return error for invalid input
+            return {
+                'prediction': 'Error',
+                'confidence': 0,
+                'error_message': str(e),
+                'safe_probability': 0,
+                'phishing_probability': 0,
+                'security_validation': 'failed',
+                'context_analysis': None
+            }
     
     def analyze_email_content(self, email_text):
         """Enhanced content analysis with more patterns"""
@@ -334,17 +478,85 @@ class ImprovedPhishingDetector:
                 explanation['reasoning'].append("• Does not contain typical phishing indicators")
         
         return explanation
+    
+    def test_security_fixes(self):
+        """Test the security and contextual analysis fixes"""
+        print("\n" + "="*60)
+        print("🔒 TESTING SECURITY AND CONTEXTUAL ANALYSIS FIXES")
+        print("="*60)
+        
+        # Test 1: Security vulnerability - should be rejected
+        print("\n🚫 Security Vulnerability Tests:")
+        security_test_cases = [
+            "<script>alert('malicious')</script>",
+            "<iframe src='evil.com'></iframe>",
+            "<html><body><script>hi</script></body></html>"
+        ]
+        
+        for i, test_case in enumerate(security_test_cases, 1):
+            result = self.predict_email(test_case)
+            print(f"Test {i}: {test_case[:30]}...")
+            print(f"   Result: {result['prediction']}")
+            print(f"   Security: {result.get('security_validation', 'unknown')}")
+            if result['prediction'] == 'Error':
+                print(f"   ✅ SECURE: Properly rejected malicious input")
+            else:
+                print(f"   ⚠️  WARNING: Should have been rejected!")
+            print()
+        
+        # Test 2: False positive prevention - should be classified as Safe
+        print("✅ False Positive Prevention Tests:")
+        false_positive_cases = [
+            "Please find the meeting agenda at this link: https://company.com/agenda.pdf",
+            "We need to discuss the project now, can you schedule a call?",
+            "Click here to view the attached report and respond by tomorrow",
+            "Your account details are in the attached invoice",
+            "Verify your credentials before accessing the secure document"
+        ]
+        
+        for i, test_case in enumerate(false_positive_cases, 1):
+            result = self.predict_email(test_case)
+            print(f"Test {i}: {test_case[:40]}...")
+            print(f"   Result: {result['prediction']} ({result['confidence']:.1f}% confidence)")
+            print(f"   Security: {result.get('security_validation', 'unknown')}")
+            if result['prediction'] == 'Safe':
+                print(f"   ✅ CORRECT: Properly classified as legitimate")
+            else:
+                print(f"   ⚠️  FALSE POSITIVE: Should be safe!")
+            if result.get('context_analysis'):
+                safe_contexts = [k for k, v in result['context_analysis'].items() if v]
+                if safe_contexts:
+                    print(f"   🔍 Context-safe keywords: {', '.join(safe_contexts)}")
+            print()
+        
+        # Test 3: Clear phishing cases - should still be detected
+        print("🎯 Clear Phishing Detection Tests:")
+        phishing_cases = [
+            "CONGRATULATIONS! You won $1000000! Click here immediately to claim your prize!",
+            "URGENT: Your bank account will be suspended in 24 hours. Click the link now!",
+            "FREE iPhone for you! Limited time offer. Click and win now!"
+        ]
+        
+        for i, test_case in enumerate(phishing_cases, 1):
+            result = self.predict_email(test_case)
+            print(f"Test {i}: {test_case[:40]}...")
+            print(f"   Result: {result['prediction']} ({result['confidence']:.1f}% confidence)")
+            if result['prediction'] == 'Phishing':
+                print(f"   ✅ CORRECT: Properly detected phishing")
+            else:
+                print(f"   ⚠️  MISSED: Should have detected phishing!")
+            print()
 
 # Global detector instance
 detector = ImprovedPhishingDetector()
 
 def main():
-    """Main function to train the improved model"""
+    """Main function to train the improved model with security fixes"""
     print("=== Improved Phishing Email Detection System ===")
     print(f"Python Version: {PYTHON_VERSION}")
     print(f"Minimum Supported: {MIN_PYTHON_VERSION}")
-    print("Enhanced Version with Improved Training Data")
-    print("="*55)
+    print("Enhanced Version with Security Fixes and Contextual Analysis")
+    print("="*60)
     
     detector.train_model()
     
@@ -367,12 +579,26 @@ def main():
         print(f"\nEmail {i}: {email[:50]}...")
         print(f"🎯 Prediction: {result['prediction']} ({result['confidence']:.1f}% confidence)")
         print(f"📊 Safe: {result['safe_probability']:.1f}% | Phishing: {result['phishing_probability']:.1f}%")
+        print(f"🔒 Security: {result.get('security_validation', 'unknown')}")
+        
+        # Show context analysis if available
+        if result.get('context_analysis'):
+            context_info = result['context_analysis']
+            safe_contexts = [k for k, v in context_info.items() if v]
+            risky_contexts = [k for k, v in context_info.items() if not v]
+            if safe_contexts:
+                print(f"   🔍 Safe contexts: {', '.join(safe_contexts)}")
+            if risky_contexts:
+                print(f"   ⚠️  Risky contexts: {', '.join(risky_contexts)}")
         
         # Show detailed explanation
         explanation = detector.generate_detailed_explanation(email)
         print("📋 Explanation:")
         for reason in explanation['reasoning']:
             print(f"   {reason}")
+    
+    # Run security and contextual analysis tests
+    detector.test_security_fixes()
 
 if __name__ == "__main__":
     main()
