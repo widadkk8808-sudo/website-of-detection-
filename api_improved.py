@@ -8,6 +8,7 @@ Created: 2025-11-24
 Enhanced Version with improved model accuracy
 """
 
+
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import pickle
@@ -20,8 +21,8 @@ from improved_phishing_detector import detector
 # Version Information
 PYTHON_VERSION = "3.13.4"
 MIN_PYTHON_VERSION = "3.7.3"
-API_VERSION = "1.1"
-MODEL_VERSION = "improved"
+API_VERSION = "1.2"
+MODEL_VERSION = "improved_secure"
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -68,7 +69,7 @@ def health_check():
 
 @app.route('/api/predict', methods=['POST'])
 def predict_email():
-    """Predict if an email is phishing or safe using improved model"""
+    """Predict if an email is phishing or safe using improved model with security fixes"""
     try:
         if not model_loaded:
             return jsonify({
@@ -91,15 +92,34 @@ def predict_email():
                 'status': 'error'
             }), 400
         
-        # Make prediction using improved model
+        # Make prediction using improved model with security fixes
         result = detector.predict_email(email_text)
+        
+        # Handle security validation errors
+        if result['prediction'] == 'Error':
+            return jsonify({
+                'status': 'error',
+                'error': result.get('error_message', 'Input validation failed'),
+                'security_validation': result.get('security_validation', 'failed'),
+                'model_version': MODEL_VERSION,
+                'prediction': 'Error',
+                'confidence': 0
+            }), 400
+        
+        # Generate explanation for normal cases
         explanation = detector.generate_detailed_explanation(email_text)
         
         return jsonify({
             'status': 'success',
             'model_version': MODEL_VERSION,
-            'prediction': result,
-            'explanation': explanation
+            'prediction': result['prediction'],
+            'confidence': result['confidence'],
+            'safe_probability': result['safe_probability'],
+            'phishing_probability': result['phishing_probability'],
+            'security_validation': result.get('security_validation', 'unknown'),
+            'context_analysis': result.get('context_analysis'),
+            'explanation': explanation,
+            'raw_result': result
         })
         
     except Exception as e:
