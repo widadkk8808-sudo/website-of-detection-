@@ -9,20 +9,20 @@ Enhanced Version with improved model accuracy
 """
 
 
+
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import pickle
 import sys
 import os
 
-# Import our improved phishing detector
-from improved_phishing_detector import detector
+# Import our phishing detector
+from working_phishing_detector import detector
 
 # Version Information
 PYTHON_VERSION = "3.13.4"
 MIN_PYTHON_VERSION = "3.7.3"
-API_VERSION = "1.2"
-MODEL_VERSION = "improved_secure"
+API_VERSION = "1.0"
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -33,10 +33,10 @@ def load_model():
         with open('svm_phishing_model.pkl', 'rb') as f:
             detector.pipeline = pickle.load(f)
         detector.is_trained = True
-        print("Improved model loaded successfully!")
+        print("Model loaded successfully!")
         return True
     except Exception as e:
-        print(f"Error loading improved model: {e}")
+        print(f"Error loading model: {e}")
         return False
 
 # Load model on startup
@@ -58,10 +58,9 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'model_loaded': model_loaded,
-        'message': 'Improved Phishing Detection API is running',
+        'message': 'Phishing Detection API is running',
         'version_info': {
             'api_version': API_VERSION,
-            'model_version': MODEL_VERSION,
             'python_version': PYTHON_VERSION,
             'minimum_python': MIN_PYTHON_VERSION
         }
@@ -69,7 +68,7 @@ def health_check():
 
 @app.route('/api/predict', methods=['POST'])
 def predict_email():
-    """Predict if an email is phishing or safe using improved model with security fixes"""
+    """Predict if an email is phishing or safe"""
     try:
         if not model_loaded:
             return jsonify({
@@ -92,34 +91,14 @@ def predict_email():
                 'status': 'error'
             }), 400
         
-        # Make prediction using improved model with security fixes
+        # Make prediction
         result = detector.predict_email(email_text)
-        
-        # Handle security validation errors
-        if result['prediction'] == 'Error':
-            return jsonify({
-                'status': 'error',
-                'error': result.get('error_message', 'Input validation failed'),
-                'security_validation': result.get('security_validation', 'failed'),
-                'model_version': MODEL_VERSION,
-                'prediction': 'Error',
-                'confidence': 0
-            }), 400
-        
-        # Generate explanation for normal cases
         explanation = detector.generate_detailed_explanation(email_text)
         
         return jsonify({
             'status': 'success',
-            'model_version': MODEL_VERSION,
-            'prediction': result['prediction'],
-            'confidence': result['confidence'],
-            'safe_probability': result['safe_probability'],
-            'phishing_probability': result['phishing_probability'],
-            'security_validation': result.get('security_validation', 'unknown'),
-            'context_analysis': result.get('context_analysis'),
-            'explanation': explanation,
-            'raw_result': result
+            'prediction': result,
+            'explanation': explanation
         })
         
     except Exception as e:
@@ -130,7 +109,7 @@ def predict_email():
 
 @app.route('/api/explain', methods=['POST'])
 def explain_prediction():
-    """Get detailed explanation for email classification using improved model"""
+    """Get detailed explanation for email classification"""
     try:
         if not model_loaded:
             return jsonify({
@@ -153,12 +132,11 @@ def explain_prediction():
                 'status': 'error'
             }), 400
         
-        # Generate explanation using improved model
+        # Generate explanation
         explanation = detector.generate_detailed_explanation(email_text)
         
         return jsonify({
             'status': 'success',
-            'model_version': MODEL_VERSION,
             'explanation': explanation
         })
         
@@ -170,7 +148,7 @@ def explain_prediction():
 
 @app.route('/api/model-info', methods=['GET'])
 def model_info():
-    """Get information about the improved trained model"""
+    """Get information about the trained model"""
     try:
         if not model_loaded:
             return jsonify({
@@ -180,23 +158,15 @@ def model_info():
         
         return jsonify({
             'status': 'success',
-            'model_type': 'Support Vector Machine (SVM) - Improved Version',
-            'algorithm': 'Linear SVM with Enhanced TF-IDF Vectorization',
-            'training_method': 'Enhanced dataset with 40 phishing + 20 safe emails',
-            'features': 'Enhanced TF-IDF vectorization with bigrams and improved parameters',
-            'accuracy_improvements': [
-                'Increased training data (40 vs 13 phishing samples)',
-                'Enhanced TF-IDF parameters (max_features=500, ngram_range=(1,2))',
-                'Improved SVM configuration (C=2.0)',
-                'Better text preprocessing and feature extraction',
-                'Confidence boosting for obvious phishing patterns'
-            ],
-            'description': 'AI-Driven Awareness Program for Phishing Email Detection using SVM (Improved Version)',
+            'model_type': 'Support Vector Machine (SVM)',
+            'algorithm': 'Linear SVM with TF-IDF Vectorization',
+            'training_method': 'Sample dataset with phishing and safe emails',
+            'features': 'TF-IDF vectorization of email text',
+            'description': 'AI-Driven Awareness Program for Phishing Email Detection using SVM',
             'version_info': {
                 'python_version': PYTHON_VERSION,
                 'minimum_python': MIN_PYTHON_VERSION,
-                'api_version': API_VERSION,
-                'model_version': MODEL_VERSION
+                'api_version': API_VERSION
             }
         })
         
@@ -221,22 +191,21 @@ def internal_error(error):
     }), 500
 
 if __name__ == '__main__':
-    print("=== Improved Phishing Detection API ===")
+    print("=== Phishing Detection API ===")
     print(f"Python Version: {PYTHON_VERSION}")
     print(f"Minimum Supported: {MIN_PYTHON_VERSION}")
     print(f"API Version: {API_VERSION}")
-    print(f"Model Version: {MODEL_VERSION}")
-    print("="*45)
-    print("Starting Improved Phishing Detection API...")
+    print("="*40)
+    print("Starting Phishing Detection API...")
     print(f"Model loaded: {model_loaded}")
     
     if model_loaded:
-        print("Improved API is ready to accept requests!")
+        print("API is ready to accept requests!")
         print("Endpoints:")
         print("  GET  /api/health - Health check")
         print("  GET  /api/model-info - Model information")
-        print("  POST /api/predict - Predict email classification (improved)")
-        print("  POST /api/explain - Get detailed explanation (improved)")
+        print("  POST /api/predict - Predict email classification")
+        print("  POST /api/explain - Get detailed explanation")
     
     # Run the Flask app
     app.run(debug=False, host='0.0.0.0', port=5000)
